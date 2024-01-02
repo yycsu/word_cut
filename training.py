@@ -269,7 +269,7 @@ epochs = 50
 
 
 # 重新定义训练函数，使用 AdversarialModel
-def train(adversarial_model, adversarial_optimizer, train_dataloader, test_dataloader, max_length):
+def train(adversarial_model, adversarial_optimizer, train_dataloader, test_dataloader, vocab_size, max_length):
     # model = model(vocab_size, tag2idx, embedding_size, hidden_size, max_length, vectors=vectors)
     # optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     # start_time = time.time()
@@ -282,10 +282,10 @@ def train(adversarial_model, adversarial_optimizer, train_dataloader, test_datal
         total_loss = 0.
         for idx, (inputs, dep_targets, crf_targets, cls_targets, length_list) in enumerate(train_dataloader):
             # 前向传播
-            ner_loss, domain_loss = adversarial_model(inputs, length_list, dep_targets, crf_targets, cls_targets)
+            ner_loss, domain_loss, autoencoder_loss  = adversarial_model(inputs, length_list, dep_targets, crf_targets, cls_targets, vocab_size)
 
             # 计算加和损失
-            merge_loss = ner_loss + domain_loss
+            merge_loss = ner_loss + domain_loss + autoencoder_loss
 
             # 计算两者的加和损失
             total_loss += merge_loss
@@ -357,29 +357,14 @@ if __name__ == '__main__':
 
     # 从这里获取预训练向量，没问题的，这里的pretrain_vectors是输入词表的embedding，输出标签不包含在内
     pretrain_vectors = get_weight(wvmodel, embedding_size, word2idx, idx2word, vocab_size)
-    
-    # 创建lstm_crf模型
-    ner_model = LSTM_CRF(vocab_size, tag2idx, embedding_size, hidden_size, train_max_length, vectors=pretrain_vectors)
 
-    # 创建领域分类模型
-    domain_discriminator = nn.Sequential(
-        nn.MaxPool1d(kernel_size=256),
-        nn.Flatten(),
-        nn.Linear(5, 1),
-        nn.Sigmoid()
-    )
-
-    adversarial_model = AdversarialModel(ner_model, domain_discriminator)
+    adversarial_model = AdversarialModel(vocab_size, tag2idx, embedding_size, hidden_size, train_max_length, pretrain_vectors)
 
     adversarial_optimizer = torch.optim.Adam(adversarial_model.parameters(), lr=0.001)
-
-    # ner_optimizer = torch.optim.Adam(ner_model.parameters(), lr=0.001)
-
-    # domain_discriminator_optimizer = torch.optim.Adam(domain_discriminator.parameters(), lr=0.001)
 
     # 开启debug情况
     torch.autograd.set_detect_anomaly(True)
 
     # 加载训练集中的字向量
-    train(adversarial_model, adversarial_optimizer, train_dataloader, test_dataloader, max_length=train_max_length)    # 开始训练模型
+    train(adversarial_model, adversarial_optimizer, train_dataloader, test_dataloader, vocab_size, max_length=train_max_length)    # 开始训练模型
 

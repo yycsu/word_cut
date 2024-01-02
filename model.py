@@ -193,6 +193,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
 from torchcrf import CRF
+import torch.nn.functional as F
 
 class LSTM_CRF(nn.Module):
     def __init__(self, vocab_size, tag_to_index, embedding_size, hidden_size, max_length, vectors=None):
@@ -202,14 +203,11 @@ class LSTM_CRF(nn.Module):
         self.vocab_size = vocab_size
         self.tag_to_index = tag_to_index
         self.target_size = len(tag_to_index)
-        if vectors is None:
-            self.embedding = nn.Embedding(vocab_size, embedding_size)   # 没有传入向量，那么直接初始化
-        else:
-            self.embedding = nn.Embedding.from_pretrained(vectors)  # 否则，使用传入的向量进行初始化
         self.lstm = nn.LSTM(embedding_size * 2, hidden_size // 2, bidirectional=True)   # 由于双向，所以中间的hidden_size需要处以2
         self.hidden_to_tag = nn.Linear(hidden_size, self.target_size)   # 用隐层的输出，作为输入，输出的长度是各类标签的长度
         self.crf = CRF(self.target_size, batch_first=True)  # nn.torchcrf层输入一个，参数1是命名实体识别的标签长度，另外一个是是否使用batch_first
         self.max_length = max_length    # 还有一个max_length
+        self.embedding = vectors
 
     def get_mask(self, length_list):        # 得到每一个padding后句子的mask，其中有实际标签的地方是1，没有的地方是0
         mask = []
@@ -277,17 +275,71 @@ class DomainDiscriminator(nn.Module):
     
     def forward(self, x):
         return torch.sigmoid(self.fc(x))
+    
+# 自编码器
+class Autoencoder(nn.Module):
+    def __init__(self, hidden_size, vocab_size, vectors=None):
+        super(Autoencoder, self).__init__()
+        self.encoder = nn.LSTM(vectors.embedding_dim, hidden_size // 2, bidirectional=True, batch_first=True)
+        self.decoder = nn.LSTM(hidden_size + 5, hidden_size // 2, bidirectional=True, batch_first=True)
+        self.output_layer = nn.Linear(hidden_size, vocab_size)
+        self.embedding = vectors
+
+    def forward(self, x, shared_encoder_out):
+        # 将index转换成embedding
+        x = self.embedding(x)
+
+        # Encoder
+        encoder_out, _ = self.encoder(x)
+
+        # Add shared encoder output
+        combined_out = torch.cat([shared_encoder_out, encoder_out], dim=2)
+
+        # Decoder
+        decoded, _ = self.decoder(combined_out)
+
+        output_probs = self.output_layer(decoded)
+
+        return output_probs
 
 # 定义对抗训练网络
 class AdversarialModel(nn.Module):
-    def __init__(self, ner_model, domain_discriminator):
+    def __init__(self, vocab_size, tag2idx, embedding_size, hidden_size, train_max_length, vectors):
         super(AdversarialModel, self).__init__()
-        self.ner_model = ner_model
-        self.domain_discriminator = domain_discriminator
+        self.embedding = nn.Embedding.from_pretrained(vectors)  # 否则，使用传入的向量进行初始化
 
-    def forward(self, sentences, length_list, dep_targets, crf_targets, cls_targets):
+        # 创建lstm_crf模型
+        self.ner_model = LSTM_CRF(vocab_size, tag2idx, embedding_size, hidden_size, train_max_length, vectors=self.embedding)
+
+        # 创建领域分类模型
+        self.domain_discriminator = nn.Sequential(
+            nn.MaxPool1d(kernel_size=256),
+            nn.Flatten(),
+            nn.Linear(5, 1),
+            nn.Sigmoid()
+        )
+
+        self.autoencoder = Autoencoder(hidden_size, vocab_size, self.embedding)
+
+
+    def forward(self, sentences, length_list, dep_targets, crf_targets, cls_targets, vocab_size):
         ner_output = self.ner_model.LSTM_Layer(sentences, dep_targets, length_list)
         ner_loss = (-1) * self.ner_model.CRF_layer(ner_output, crf_targets, length_list)
+
+        # 损失函数
+        autoencoder_loss = nn.CrossEntropyLoss()
+
+        output_probs = self.autoencoder(sentences, ner_output)
+
+        # 目标sentences
+        target_sequence = sentences
+
+        # 展平输出和目标序列以匹配交叉熵损失函数的输入要求
+        output_probs_flattened = output_probs.view(-1, output_probs.size(2))
+        target_sequence_flattened = torch.nn.functional.one_hot(target_sequence, num_classes=vocab_size).view(-1, output_probs.size(2)).float()
+
+        # 计算交叉熵损失
+        autoencoder_loss = autoencoder_loss(output_probs_flattened, target_sequence_flattened)
 
         domain_output = self.domain_discriminator(ner_output.permute(0, 2, 1))
 
@@ -300,4 +352,4 @@ class AdversarialModel(nn.Module):
         # # 添加领域判别器
         # domain_output = self.domain_discriminator(ner_output_copy.permute(0, 2, 1))
 
-        return ner_loss, domain_loss
+        return ner_loss, domain_loss, autoencoder_loss
