@@ -285,16 +285,19 @@ class AdversarialModel(nn.Module):
         self.ner_model = ner_model
         self.domain_discriminator = domain_discriminator
 
-    def forward(self, sentences, length_list, dep_targets, crf_targets):
+    def forward(self, sentences, length_list, dep_targets, crf_targets, cls_targets):
         ner_output = self.ner_model.LSTM_Layer(sentences, dep_targets, length_list)
         ner_loss = (-1) * self.ner_model.CRF_layer(ner_output, crf_targets, length_list)
 
         domain_output = self.domain_discriminator(ner_output.permute(0, 2, 1))
-        
+
+        domain_labels = cls_targets.unsqueeze(1).float()
+        domain_loss = nn.BCELoss()(domain_output, domain_labels)
+
         # # 复制一份 ner_output，避免 inplace 操作
         # ner_output_copy = ner_output.clone().detach()
         
         # # 添加领域判别器
         # domain_output = self.domain_discriminator(ner_output_copy.permute(0, 2, 1))
 
-        return ner_loss, domain_output
+        return ner_loss, domain_loss

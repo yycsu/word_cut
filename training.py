@@ -282,10 +282,7 @@ def train(adversarial_model, adversarial_optimizer, train_dataloader, test_datal
         total_loss = 0.
         for idx, (inputs, dep_targets, crf_targets, cls_targets, length_list) in enumerate(train_dataloader):
             # 前向传播
-            ner_loss, domain_output = adversarial_model(inputs, length_list, dep_targets, crf_targets)
-
-            domain_labels = cls_targets.unsqueeze(1).float()
-            domain_loss = nn.BCELoss()(domain_output, domain_labels)
+            ner_loss, domain_loss = adversarial_model(inputs, length_list, dep_targets, crf_targets, cls_targets)
 
             # 计算加和损失
             merge_loss = ner_loss + domain_loss
