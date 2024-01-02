@@ -13,13 +13,15 @@ import random
 
 import jieba
 
+# 这个类是用来记录词表的，每次对一句话进行分词，并加入词表中
 class Lang:
     def __init__(self, name):
         self.name = name
         self.word2index = {}
         self.word2count = {}
-        self.index2word = {0: "SOS", 1: "EOS",2:'UNK'}
-        self.n_words = 2  # Count SOS and EOS
+        self.index2word = {0: "SOS", 1: "EOS", 2:'UNK', 3:'SBV', 4:'VOB', 5:'POB', 6:'ADV', 7:'CMP', 8:'ATT', 
+                           9:'F', 10:'COO', 11:'DBL', 12:'DOB', 13:'VV', 14:'IC', 15:'MT', 16:'HED'}
+        self.n_words = 16  # Count SOS and EOS
 
     def addSentence(self, sentence):
         for word in jieba.cut(sentence):
@@ -33,6 +35,8 @@ class Lang:
             self.n_words += 1
         else:
             self.word2count[word] += 1
+
+
 
 
 def readLangs(lang1, lang2, reverse=False):
@@ -85,6 +89,7 @@ eng_prefixes = (
 
 
 def filterPair(p):
+    # 分词后，太长的去掉，这里设置的长度是200
     return len(jieba.lcut(p[0])) < MAX_LENGTH 
 
 def filterPairs(pairs):
@@ -108,7 +113,43 @@ def prepareData(input_lang,output_lang,pairs):
 #input_lang, output_lang, pairs = prepareData('eng', 'fra', True)
 #print(random.choice(pairs))
 
+import os
+import torch
+import gensim
+import numpy as np
+from gensim.models import word2vec
+
+cur = '/'.join(os.path.abspath(__file__).split('/')[:-1])
+# dep_embedding = os.path.join(cur, 'emb/dep_vec_10.bin')
+# token_embedding = os.path.join(cur, 'emb/token_vec_300.bin')
+embedding_path = os.path.join(cur, 'emb/sgns.wiki.bigram-char.bz2')
+
+def get_vector_fix(word, model, unk_token='UNK'):
+    try:
+        return model.get_vector(word)
+    except KeyError:
+        return model.get_vector(unk_token)
+
+def get_weight(path, embed_size, lang):
+    wvmodel = gensim.models.KeyedVectors.load_word2vec_format(path, binary=False, encoding='utf-8')
+    vocab_size = lang.n_words
+    weight = torch.zeros(vocab_size, embed_size)
+
+    for i in range(len(wvmodel.index_to_key)):
+        try:
+            index = lang.word2index[wvmodel.index_to_key[i]]
+        except:
+            continue
+        word = lang.index2word[lang.word2index[wvmodel.index_to_key[i]]]
+
+        weight[index, :] = torch.from_numpy(get_vector_fix(word, wvmodel,'UNK'))
+    return weight
 
 if __name__ =='__main__':
-    input_lang, output_lang, pairs=readfile(r'./测试文本/orig.txt')
+    input_lang, output_lang, pairs = readfile(r'./测试文本/orig.txt')
     input_lang, output_lang, pairs = prepareData(input_lang, output_lang, pairs)
+    # token_weight = get_weight(token_embedding, 300, input_lang)
+    # dep_weight = get_weight(dep_embedding, 10, input_lang)
+    weight = get_weight(embedding_path, 300, input_lang)
+    print(f"we get the weight, the shape is {weight.shape}")
+
