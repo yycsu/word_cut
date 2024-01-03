@@ -193,10 +193,10 @@ def padding(x, max_length, d):
         x.append(d['<pad>'])
     return x
 
-def get_dataloader(word2idx, tag2idx, x, y_crf, y_dep, y_cls, batch_size):
+def get_dataloader(word2idx, tag2idx, x, y_crf, y_dep, y_cls, batch_size, device):
     # word2idx, tag2idx, vocab_size = pre_processing()
     inputs = [sentence2vector(s, word2idx) for s in x]  # 每个句子通过字典从char映射成数字
-    dep_targets = [sentence2vector(s, word2idx) for s in y_dep] # 每个句子依存关系从char映射成数字
+    dep_inputs = [sentence2vector(s, word2idx) for s in y_dep] # 每个句子依存关系从char映射成数字
     crf_targets = [sentence2vector(s, tag2idx) for s in y_crf]  # 每个标签都通过字典从char映射成数字
     cls_targets = y_cls
 
@@ -208,16 +208,20 @@ def get_dataloader(word2idx, tag2idx, x, y_crf, y_dep, y_cls, batch_size):
     print(f"the max_length is {max_length}")
 
     inputs = [sample[:max_length] for sample in inputs]
-    dep_targets = [sample[:max_length] for sample in dep_targets]
+    dep_inputs = [sample[:max_length] for sample in dep_inputs]
     crf_targets = [sample[:max_length] for sample in crf_targets]
 
     # 进行文本填充
     inputs = torch.tensor([padding(sentence, max_length, word2idx) for sentence in inputs])     # 将所有句子padding到同一个长度
-    dep_targets = torch.tensor([padding(sentence, max_length, tag2idx) for sentence in dep_targets], dtype=torch.long)      # 将所有标签padding到同一个长度
+    dep_inputs = torch.tensor([padding(sentence, max_length, tag2idx) for sentence in dep_inputs], dtype=torch.long)      # 将所有标签padding到同一个长度
     crf_targets = torch.tensor([padding(sentence, max_length, tag2idx) for sentence in crf_targets], dtype=torch.long)      # 将所有标签padding到同一个长度
 
-    dataset = mydataset(inputs, dep_targets, crf_targets, cls_targets, length_list)   # 创建一个dataset的类，类中需要实现__init__、__get_item__、__len__三个函数， 其中get_item回返回x，y以及句子长度
-    dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size)  # 标准的torch的dataloader类的用法
+    dataset = mydataset(inputs, dep_inputs, crf_targets, cls_targets, length_list)   # 创建一个dataset的类，类中需要实现__init__、__get_item__、__len__三个函数， 其中get_item回返回x，y以及句子长度
+    
+    # 如果device是gpu，则打开pin_memory
+    pin_memory = True if device == 'gpu' else False
+    
+    dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, pin_memory=pin_memory)  # 标准的torch的dataloader类的用法
 
     return dataloader, max_length   # 最后返回了dataloader和ma_length
 

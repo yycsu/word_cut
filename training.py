@@ -319,7 +319,6 @@ def train(adversarial_model, adversarial_optimizer, train_dataloader, test_datal
                 print("epochs : {}, batch : {}, loss : {}".format(epoch+1, idx*batch_size,
                                                             cur_loss / (20 * batch_size)))
 
-
 if __name__ == '__main__':
     # 加载预训练数据集
     # vectors = Vectors('/Users/yaoyi/vscode_project/lstm-crf/glove.6B.100d.txt', '/Users/yaoyi/vscode_project//embedding/')
